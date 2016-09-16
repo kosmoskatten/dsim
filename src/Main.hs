@@ -40,9 +40,14 @@ main = do
     match POST </> "api" </> "0.1" </> "mme" <!> None
           ==> (createMme self =<< bodyByteString)
 
+    -- Fetch the list of IP addresses for the mme.
     match GET </> "api" </> "0.1" </> "mme"
               </:> "name" </> "ip_config" <!> None
           ==> getIpConfig self
+
+    -- Delete the mme.
+    match DELETE </> "api" </> "0.1" </> "mme" </:> "name" <!> None
+          ==> deleteMme self
 
     -- The match all clause will do static serving.
     matchAll ==> serveDirectory "."
@@ -92,6 +97,27 @@ getIpConfig self = do
   maybe (respondText NotFound "Not Found")
         (respondJSON Ok)
         maybeMme
+
+deleteMme :: Self -> Handler HandlerResponse
+deleteMme self = do
+    name <- capture "name"
+    deleted <- liftIO (atomically $ maybeDelete name)
+    if deleted
+        then do
+            logInfo $ printf "deleteMme: delete %s" (show name)
+            respondText Ok ""
+        else do
+            logInfo $ printf "deleteMme: not found %s" (show name)
+            respondText NotFound "Not Found"
+    where
+      maybeDelete :: Text -> STM Bool
+      maybeDelete name = do
+        mmes <- readTVar (mmeMap self)
+        case Map.lookup name mmes of
+            Just _  -> do
+                writeTVar (mmeMap self) (Map.delete name mmes)
+                return True
+            Nothing -> return False
 
 mkMmeUrl :: Text -> Text
 mkMmeUrl name = "/api/0.1/mme/" `T.append` name
